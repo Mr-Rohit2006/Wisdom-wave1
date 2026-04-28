@@ -421,7 +421,7 @@ export default function Battle() {
                 </div>
                 <input
                   value={joinCode}
-                  onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                  onChange={(e) => setJoinCode(e.target.value)}
                   placeholder="Enter room code"
                   style={{
                     width: "100%",
