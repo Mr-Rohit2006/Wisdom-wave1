@@ -306,39 +306,63 @@ export default function Arcade() {
   };
 
   const finishQuiz = async () => {
-    setView("results");
-    if (!user || !selTopic) return;
-    // Always mark topic as solved in UI
-    setSolvedTopics((s) => new Set([...s, selTopic.id]));
-    const earnedXP = xpRef.current; // use ref — state may be stale in closure
-    if (earnedXP === 0) return;
-    // ── 90% rule: need at least 9/10 correct to earn XP ──
-    const totalQ = selTopic.questions.length;
-    // Use scoreRef for real-time value (score state may be stale in closure)
-    const scorePct = totalQ > 0 ? (scoreRef.current / totalQ) * 100 : 0;
-    if (scorePct < 90) return; // below 90% — no XP saved
-    const modeInfo = MODES.find((m) => m.id === selMode)!;
-    try {
-      const result = await saveTopicCompletion({
-        uid: user.uid,
-        langId: selLang?.id ?? "",
-        topicId: selTopic.id,
-        xpEarned: earnedXP,
-        modeIcon: modeInfo.icon,
-        modeTitle: modeInfo.title,
-        topicName: selTopic.name,
-        langName: selLang?.name ?? "",
-        langColor: selLang?.color ?? "#22d3ee",
-      });
-      setUserXP(result.newXP);
-      setTopicsDone(result.topicsDone);
-      setSolvedTopics(new Set(result.topicsDone));
-      setLastQuizAlreadyDone(result.alreadyDone);
-    } catch (e) {
-      console.error(e);
-    }
-  };
+  // reset old state first
+  setLastQuizAlreadyDone(false);
 
+  if (!user || !selTopic) {
+    setView("results");
+    return;
+  }
+
+  // UI mark solved
+  setSolvedTopics((s) => new Set([...s, selTopic.id]));
+
+  const earnedXP = xpRef.current;
+  const totalQ = selTopic.questions.length;
+
+  const scorePct =
+    totalQ > 0
+      ? (scoreRef.current / totalQ) * 100
+      : 0;
+
+  // below 90%
+  if (earnedXP === 0 || scorePct < 90) {
+    setView("results");
+    return;
+  }
+
+  const modeInfo = MODES.find(
+    (m) => m.id === selMode
+  )!;
+
+  try {
+    const result = await saveTopicCompletion({
+      uid: user.uid,
+      langId: selLang?.id ?? "",
+      topicId:  `${selMode}_${selTopic.id}`,
+      xpEarned: earnedXP,
+      modeIcon: modeInfo.icon,
+      modeTitle: modeInfo.title,
+      topicName: selTopic.name,
+      langName: selLang?.name ?? "",
+      langColor: selLang?.color ?? "#22d3ee",
+    });
+
+    setUserXP(result.newXP);
+    setTopicsDone(result.topicsDone);
+    setSolvedTopics(
+      new Set(result.topicsDone)
+    );
+    setLastQuizAlreadyDone(
+      result.alreadyDone
+    );
+  } catch (e) {
+    console.error(e);
+  }
+
+  // move result page LAST
+  setView("results");
+  };
   // ════════════════════════════════════════════════
   // VIEW: LANGUAGE SELECT
   // ════════════════════════════════════════════════
@@ -1440,6 +1464,8 @@ export default function Arcade() {
   // ════════════════════════════════════════════════
   if (view === "results" && selTopic) {
     const pct = Math.round((score / selTopic.questions.length) * 100);
+    const passed90 = pct >= 90;
+    const lastQuizAlreadyDone = solvedTopics.has(selTopic.id);
     const grade =
       pct >= 80
         ? "🏆 Excellent!"

@@ -5,6 +5,8 @@ import Register from "../pages/Register";
 import Dashboard from "../pages/Dashboard";
 import Arcade from "../pages/Arcade";
 import Puzzle from "../pages/Puzzle";
+import Leaderboard from "../pages/Leaderboard";
+import Battle from "../pages/Battle";
 const AppRoutes = () => {
   return (
     <BrowserRouter>
@@ -15,7 +17,8 @@ const AppRoutes = () => {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/arcade" element={<Arcade />} />
         <Route path="/puzzle" element={<Puzzle />} />
-
+        <Route path="/leaderboard" element={<Leaderboard />} />
+        <Route path="/Battle" element={<Battle />} />
       </Routes>
     </BrowserRouter>
   );
