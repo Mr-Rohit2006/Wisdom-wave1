@@ -1,9 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { signOut } from "firebase/auth";
-import { doc, getDoc, collection, query, orderBy, limit, getDocs } from "firebase/firestore";
-import { auth, db } from "../firebase";
-import { checkAndUpdateStreak, buildModuleProgress, calcLevel, levelBounds } from "../services/userServices";
+import { checkAndUpdateStreak, buildModuleProgress, calcLevel, levelBounds, fetchUserData } from "../services/userServices";
+import { getLeaderboard } from "../services/api";
 import type { ModuleProgress } from "../services/userServices";
 import { LANGUAGES } from "../data/arcadeQuestions";
 
@@ -49,27 +47,21 @@ export default function Dashboard() {
   const [streakToast, setStreakToast] = useState<{ show: boolean; streak: number; bonusXP: number }>({ show: false, streak: 0, bonusXP: 0 });
 
   useEffect(() => {
-    const unsub = auth.onAuthStateChanged(async (user) => {
-      if (!user) { navigate("/login"); return; }
+    const initData = async () => {
+      const token = localStorage.getItem("token");
+      if (!token) { navigate("/login"); return; }
       try {
-        // ── 1. Check & update streak on login ──
-        const { streak, isNewDay, bonusXP } = await checkAndUpdateStreak(user.uid);
-
-        // ── 2. Fetch full user data ──
-        const userDoc = await getDoc(doc(db, "users", user.uid));
-        if (userDoc.exists()) {
-          const data = userDoc.data() as UserData;
-          // Use fresh XP from streak update
+        const { streak, isNewDay, bonusXP } = await checkAndUpdateStreak("me");
+        const data = await fetchUserData("me");
+        if (data) {
           const latestXP = data.xp;
           const latestLevel = calcLevel(data.xp ?? 0);
           setUserData({ ...data, streak });
 
-          // ── 3. Build module progress from topicsDone ──
           const topicsDone: string[] = data.topicsDone ?? [];
           const progress = data.moduleProgress ?? buildModuleProgress(topicsDone);
           setModuleProgress(progress);
 
-          // ── 4. Animate XP bar ──
           const xpForCurrentLevel = latestLevel > 1 ? Math.pow(latestLevel - 1, 2) * 50 : 0;
           const xpForNextLevel = Math.pow(latestLevel, 2) * 50;
           const pct = xpForNextLevel > xpForCurrentLevel
@@ -84,9 +76,7 @@ export default function Dashboard() {
           };
           setTimeout(() => requestAnimationFrame(step), 400);
 
-          // ── 5. Show streak toast ──
           if (isNewDay && streak > 0) {
-            // Small delay so page loads first, then toast slides in
             setTimeout(() => {
               setStreakToast({ show: true, streak, bonusXP });
               setTimeout(() => setStreakToast(s => ({ ...s, show: false })), 5000);
@@ -94,20 +84,18 @@ export default function Dashboard() {
           }
         }
 
-        // ── 6. Leaderboard ──
-        const q = query(collection(db, "users"), orderBy("xp", "desc"), limit(5));
-        const snapshot = await getDocs(q);
-        const lb: LeaderboardUser[] = [];
-        snapshot.forEach((d) => lb.push({ uid: d.id, ...d.data() } as LeaderboardUser));
-        setLeaderboard(lb);
+        const lb = await getLeaderboard("xp");
+        setLeaderboard(lb.slice(0, 5));
       } catch (err) {
         console.error(err);
+        localStorage.removeItem("token");
+        navigate("/login");
       } finally {
         setLoading(false);
       }
-    });
-    return unsub;
-  }, []);
+    };
+    initData();
+  }, [navigate]);
 
   // ── NAV HANDLER ──
   const handleNav = (link: string) => {
@@ -117,9 +105,9 @@ export default function Dashboard() {
     if (link === "Leaderboard") navigate("/leaderboard");
   };
 
-  const handleLogout = async () => { await signOut(auth); navigate("/"); };
+  const handleLogout = () => { localStorage.removeItem("token"); navigate("/"); };
 
-  const username = userData?.username || auth.currentUser?.displayName || "Player";
+  const username = userData?.username || "Player";
   const xp = userData?.xp ?? 0;
   const level = userData?.level ?? 1;
 
@@ -159,7 +147,7 @@ export default function Dashboard() {
   const xpNeeded = xpForNext - xp;
   const rankBadges = ["👑", "🥈", "🥉"];
   const rankColors = ["#fbbf24", "#cbd5e1", "#b4783c"];
-  const currentUserRank = leaderboard.findIndex((u) => u.uid === auth.currentUser?.uid) + 1;
+  const currentUserRank = leaderboard.findIndex((u) => u.username === userData?.username) + 1;
 
   if (loading) {
     return (
@@ -443,7 +431,7 @@ export default function Dashboard() {
                 <div style={{ textAlign: "center", padding: "24px 0", color: "rgba(255,255,255,0.25)", fontSize: "0.8rem", fontFamily: "'DM Mono',monospace" }}>No players yet 👾<br />Be the first!</div>
               ) : (
                 leaderboard.map((p, i) => {
-                  const isMe = p.uid === auth.currentUser?.uid;
+                  const isMe = p.username === userData?.username;
                   return (
                     <div key={p.uid} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, background: isMe ? "rgba(34,211,238,0.05)" : i < 3 ? `rgba(${i === 0 ? "251,191,36" : i === 1 ? "203,213,225" : "180,120,60"},0.05)` : "transparent", border: `1px solid ${isMe ? "rgba(34,211,238,0.25)" : i < 3 ? `rgba(${i === 0 ? "251,191,36" : i === 1 ? "203,213,225" : "180,120,60"},0.2)` : "rgba(255,255,255,0.04)"}` }}>
                       <span style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: "0.9rem", width: 22, color: i < 3 ? rankColors[i] : "rgba(255,255,255,0.3)", textAlign: "center", flexShrink: 0 }}>{i < 3 ? rankBadges[i] : i + 1}</span>

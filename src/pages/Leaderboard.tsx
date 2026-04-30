@@ -1,14 +1,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { auth, db } from "../firebase";
-import {
-  collection,
-  query,
-  orderBy,
-  limit,
-  getDocs,
-} from "firebase/firestore";
 import { calcLevel } from "../services/userServices";
+import { getLeaderboard } from "../services/api";
+import { jwtDecode } from "jwt-decode";
 
 const FONTS = `@import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800;900&family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');`;
 
@@ -42,7 +36,6 @@ function getAvatarColor(uid: string): string {
 
 export default function Leaderboard() {
   const navigate = useNavigate();
-  const user = auth.currentUser;
 
   const [users, setUsers] = useState<LeaderboardUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,26 +43,34 @@ export default function Leaderboard() {
   const [myRank, setMyRank] = useState<number | null>(null);
   const [myData, setMyData] = useState<LeaderboardUser | null>(null);
   const [animIn, setAnimIn] = useState(false);
+  const [currentUsername, setCurrentUsername] = useState<string | null>(null);
 
-  const fetchLeaderboard = async () => {
+  const fetchLeaderboardData = async () => {
     setLoading(true);
-    const orderField = filter === "xp" ? "xp" : filter === "streak" ? "streak" : "puzzlesSolved";
-    const q = query(collection(db, "users"), orderBy(orderField, "desc"), limit(50));
-    const snap = await getDocs(q);
-    const list: LeaderboardUser[] = [];
-    snap.forEach(d => list.push({ uid: d.id, ...d.data() } as LeaderboardUser));
-    setUsers(list);
-    const rank = list.findIndex(u => u.uid === user?.uid);
-    setMyRank(rank >= 0 ? rank + 1 : null);
-    setMyData(list.find(u => u.uid === user?.uid) ?? null);
-    setLoading(false);
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) { navigate("/login"); return; }
+      
+      const decoded: any = jwtDecode(token);
+      
+      const list = await getLeaderboard(filter === "puzzles" ? "puzzlesSolved" : filter);
+      setUsers(list);
+      // uid from backend is MongoDB _id. Let's find by matching ID
+      const rank = list.findIndex((u: LeaderboardUser) => u.uid === decoded.user.id);
+      setMyRank(rank >= 0 ? rank + 1 : null);
+      setMyData(list.find((u: LeaderboardUser) => u.uid === decoded.user.id) ?? null);
+      setCurrentUsername(list.find((u: LeaderboardUser) => u.uid === decoded.user.id)?.username ?? null);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    if (!user) { navigate("/login"); return; }
-    fetchLeaderboard();
+    fetchLeaderboardData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter]);
+  }, [filter, navigate]);
 
   useEffect(() => {
     setTimeout(() => setAnimIn(true), 100);
@@ -126,9 +127,9 @@ export default function Leaderboard() {
           <>
             {top3.length >= 3 && (
               <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 16, marginBottom: 40, opacity: animIn ? 1 : 0, transform: animIn ? "translateY(0)" : "translateY(30px)", transition: "all 0.7s ease 0.2s" }}>
-                <PodiumCard user={top3[1]} rank={2} filter={filter} height={160} />
-                <PodiumCard user={top3[0]} rank={1} filter={filter} height={200} isFirst />
-                <PodiumCard user={top3[2]} rank={3} filter={filter} height={130} />
+                <PodiumCard user={top3[1]} rank={2} filter={filter} height={160} currentUsername={currentUsername} />
+                <PodiumCard user={top3[0]} rank={1} filter={filter} height={200} isFirst currentUsername={currentUsername} />
+                <PodiumCard user={top3[2]} rank={3} filter={filter} height={130} currentUsername={currentUsername} />
               </div>
             )}
 
@@ -141,7 +142,7 @@ export default function Leaderboard() {
 
               {rest.map((u, i) => {
                 const rank = i + 4;
-                const isMe = u.uid === user?.uid;
+                const isMe = u.username === currentUsername;
                 const avatarColor = getAvatarColor(u.uid);
                 const val = filter === "xp" ? u.xp : filter === "streak" ? u.streak : u.puzzlesSolved;
                 return (
@@ -215,18 +216,18 @@ export default function Leaderboard() {
   );
 }
 
-function PodiumCard({ user, rank, filter, height, isFirst }: {
+function PodiumCard({ user, rank, filter, height, isFirst, currentUsername }: {
   user: LeaderboardUser;
   rank: 1 | 2 | 3;
   filter: "xp" | "streak" | "puzzles";
   height: number;
   isFirst?: boolean;
+  currentUsername?: string | null;
 }) {
   const rc = RANK_COLORS[rank];
   const avatarColor = getAvatarColor(user.uid);
   const val = filter === "xp" ? user.xp : filter === "streak" ? user.streak : user.puzzlesSolved;
-  const currentUser = auth.currentUser;
-  const isMe = user.uid === currentUser?.uid;
+  const isMe = user.username === currentUsername;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: isFirst ? 1.1 : 1 }}>

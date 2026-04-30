@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { auth, db } from "../firebase";
-import { doc, getDoc, updateDoc, increment, arrayUnion, serverTimestamp } from "firebase/firestore";
+import { fetchUserData } from "../services/userServices";
+import { recordPuzzleWin } from "../services/api";
 
 const FONTS = `@import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');`;
 
@@ -32,7 +32,6 @@ type PuzzleType = "menu" | "unscramble" | "sort";
 
 export default function Puzzle() {
   const navigate = useNavigate();
-  const user = auth.currentUser;
   const [view, setView] = useState<PuzzleType>("menu");
   const [userXP, setUserXP] = useState(0);
 
@@ -73,11 +72,21 @@ export default function Puzzle() {
   ];
 
   useEffect(() => {
-    if (!user) { navigate("/login"); return; }
-    getDoc(doc(db, "users", user.uid)).then(snap => {
-      if (snap.exists()) setUserXP(snap.data().xp ?? 0);
-    });
-  }, []);
+    const initData = async () => {
+      const token = localStorage.getItem("token");
+      if (!token) { navigate("/login"); return; }
+      try {
+        const data = await fetchUserData("me");
+        if (data) {
+          setUserXP(data.xp ?? 0);
+        }
+      } catch (err) {
+        console.error(err);
+        navigate("/login");
+      }
+    };
+    initData();
+  }, [navigate]);
 
   // Init unscramble
   useEffect(() => {
@@ -100,16 +109,12 @@ export default function Puzzle() {
 
   // ── Award XP ──
   const awardXP = async (xp: number, title: string) => {
-    if (!user) return;
-    const snap = await getDoc(doc(db, "users", user.uid));
-    const cur = snap.exists() ? snap.data().xp ?? 0 : 0;
-    setUserXP(cur + xp);
-    await updateDoc(doc(db, "users", user.uid), {
-      xp: increment(xp),
-      puzzlesSolved: increment(1),
-      lastActive: serverTimestamp(),
-      activity: arrayUnion({ icon: "🧩", text: `Puzzle: ${title}`, xp: `+${xp} XP`, time: "just now", color: "#22d3ee" }),
-    });
+    try {
+      const data = await recordPuzzleWin(xp, title);
+      setUserXP(data.user.xp);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   // ── Unscramble: add word to arranged ──

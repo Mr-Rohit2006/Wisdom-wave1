@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { signInWithEmailAndPassword } from "firebase/auth";
-import { auth } from "../firebase";
+import { loginUser } from "../services/api";
+import { jwtDecode } from "jwt-decode";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -25,16 +25,12 @@ export default function Login() {
     if (Object.keys(errs).length) { setErrors(errs); return; }
     setLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, form.email, form.password);
+      const data = await loginUser({ email: form.email, password: form.password });
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("user", JSON.stringify(data.user));
       navigate("/dashboard");
     } catch (err: any) {
-      if (err.code === "auth/user-not-found" || err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
-        setErrors({ password: "Invalid email or password. Try again!" });
-      } else if (err.code === "auth/too-many-requests") {
-        setErrors({ password: "Too many attempts. Try again later!" });
-      } else {
-        setErrors({ password: "Something went wrong. Try again!" });
-      }
+      setErrors({ password: err.message || "Invalid email or password. Try again!" });
     } finally {
       setLoading(false);
     }

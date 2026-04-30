@@ -1,8 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { auth, db, rtdb } from "../firebase";
-import { doc, getDoc, updateDoc, increment } from "firebase/firestore";
-import { ref, set, get, onValue, off, remove, push } from "firebase/database";
+import { io, Socket } from "socket.io-client";
+import { recordBattleWin } from "../services/api";
 import {
   JAVA_OUTPUT_TOPICS,
   JAVA_BUG_TOPICS,
@@ -78,13 +77,13 @@ interface BattleRoom {
 
 export default function Battle() {
   const navigate = useNavigate();
-  const user = auth.currentUser;
+  const user = JSON.parse(localStorage.getItem("user") || "null");
   const [phase, setPhase] = useState<Phase>("lobby");
   const [roomId, setRoomId] = useState<string>("");
   const [joinCode, setJoinCode] = useState("");
   const [room, setRoom] = useState<BattleRoom | null>(null);
   const [isHost, setIsHost] = useState(false);
-  const [username, setUsername] = useState("Player");
+  const [username, setUsername] = useState(user?.username || "Player");
 
   // Battle state
   const [currentQ, setCurrentQ] = useState(0);
@@ -96,6 +95,7 @@ export default function Battle() {
   const [mvAnswers, setMvAnswers] = useState<boolean[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const roomRef = useRef<string>("");
+  const socketRef = useRef<Socket | null>(null);
 
   // FIXED: Added missing enemyScore variable
   const enemyScore = room
@@ -109,97 +109,84 @@ export default function Battle() {
       navigate("/login");
       return;
     }
-    getDoc(doc(db, "users", user.uid)).then((snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        setUsername(data.username || "Player");
+
+    // Connect socket
+    socketRef.current = io("http://localhost:5000");
+
+    socketRef.current.on('room_created', (data) => {
+      setRoomId(data.roomId);
+      roomRef.current = data.roomId;
+      setRoom(data.room);
+      setIsHost(true);
+      setPhase("waiting");
+    });
+
+    socketRef.current.on('room_joined', (data) => {
+      setRoom(data.room);
+      setPhase("waiting");
+    });
+
+    socketRef.current.on('room_update', (data) => {
+      setRoom(data.room);
+      if (data.room.status === "active" && roomRef.current === "") {
+         // Guest setting phase active is handled in joinRoom response usually, but we sync state
+         setPhase("battle");
+         setCurrentQ(0);
+         setTimeLeft(TIME_PER_Q);
+         startTimer(data.roomId, data.room, 0, 0);
       }
     });
+
+    socketRef.current.on('error', (data) => {
+      alert(data.message);
+    });
+
+    socketRef.current.on('room_closed', () => {
+      if (phase !== "result") {
+         alert("Room closed");
+         leaveRoom();
+      }
+    });
+
     setTimeout(() => {
       setAnimIn(true);
     }, 100);
+
     return () => {
       stopTimer();
+      if (socketRef.current) socketRef.current.disconnect();
     };
-  }, [user, navigate]);
+  }, [navigate]);
 
   useEffect(() => {
-    if (!roomId) return;
-    const rRef = ref(rtdb, "battles/" + roomId);
-    onValue(rRef, (snap) => {
-      const data = snap.val() as BattleRoom;
-      if (!data) return;
-      setRoom(data);
-      if (data.status === "active" && phase === "waiting") {
-        setPhase("battle");
-        setCurrentQ(0);
-        setTimeLeft(TIME_PER_Q);
-        startTimer(roomId, data, 0, 0);
+    if (room?.status === "active" && phase === "waiting") {
+      setPhase("battle");
+      setCurrentQ(0);
+      setTimeLeft(TIME_PER_Q);
+      startTimer(roomId, room, 0, 0);
+    }
+    if (room?.status === "done" && phase === "battle") {
+      stopTimer();
+      setPhase("result");
+      if (user && room.winner === user.id) {
+        recordBattleWin().catch(e => console.error(e));
       }
-      if (data.status === "done" && phase === "battle") {
-        stopTimer();
-        setPhase("result");
-        if (user && data.winner === user.uid) {
-          updateDoc(doc(db, "users", user.uid), {
-            battleWon: increment(1),
-            xp: increment(50),
-          });
-        }
-      }
-    });
-    return () => {
-      off(rRef);
-    };
-  }, [roomId, phase, user]);
+    }
+  }, [room, phase, user, roomId]);
 
-  const createRoom = async () => {
-    console.log(user)
-    if (!user) return;
+  const createRoom = () => {
+    if (!user || !socketRef.current) return;
     const questions = getRandomQuestions(TOTAL_QUESTIONS);
-    const newRef = push(ref(rtdb, "battles"));
-    const id = newRef.key!;
-    const roomData: BattleRoom = {
-      host: user.uid,
-      hostName: username,
-      status: "waiting",
-      questions,
-      hostScore: 0,
-      guestScore: 0,
-      hostDone: false,
-      guestDone: false,
-      createdAt: Date.now(),
-    };
-    await set(newRef, roomData);
-    setRoomId(id);
-    roomRef.current = id;
-    setIsHost(true);
-    setPhase("waiting");
+    socketRef.current.emit('create_room', { userId: user.id, username, questions });
   };
 
-  const joinRoom = async () => {
-    if (!user || !joinCode.trim()) return;
+  const joinRoom = () => {
+    if (!user || !joinCode.trim() || !socketRef.current) return;
     const code = joinCode.trim();
-    const snap = await get(ref(rtdb, "battles/" + code));
-    if (!snap.exists()) {
-      alert("Room not found!");
-      return;
-    }
-    const data = snap.val() as BattleRoom;
-    if (data.status !== "waiting") {
-      alert("Battle already in progress!");
-      return;
-    }
-    if (data.guest) {
-      alert("Room is full!");
-      return;
-    }
-    await set(ref(rtdb, "battles/" + code + "/guest"), user.uid);
-    await set(ref(rtdb, "battles/" + code + "/guestName"), username);
-    await set(ref(rtdb, "battles/" + code + "/status"), "active");
     setRoomId(code);
     roomRef.current = code;
     setIsHost(false);
-    setPhase("waiting");
+    socketRef.current.emit('join_room', { roomId: code, userId: user.id, username });
   };
 
   const startTimer = (
@@ -243,7 +230,7 @@ export default function Battle() {
     }, 900);
   };
 
-  const handleNext = async (
+  const handleNext = (
     rid: string,
     roomData: BattleRoom,
     qIndex: number,
@@ -255,38 +242,35 @@ export default function Battle() {
     setSelected(null);
 
     if (nextQ >= TOTAL_QUESTIONS) {
-      const scoreField = isHost ? "hostScore" : "guestScore";
-      const doneField = isHost ? "hostDone" : "guestDone";
-
-      await set(ref(rtdb, `battles/${rid}/${scoreField}`), finalScore);
-      await set(ref(rtdb, `battles/${rid}/${doneField}`), true);
-
-      const snap = await get(ref(rtdb, "battles/" + rid));
-      const latest = snap.val() as BattleRoom;
-
-      // FIXED: Proper bothDone check
-      if (latest.hostDone && latest.guestDone) {
-        let winner = "";
-        if (latest.hostScore > latest.guestScore) winner = latest.host;
-        else if (latest.guestScore > latest.hostScore) winner = latest.guest!;
-        else winner = "draw";
-
-        await set(ref(rtdb, `battles/${rid}/winner`), winner);
-        await set(ref(rtdb, `battles/${rid}/status`), "done");
+      if (socketRef.current) {
+         socketRef.current.emit('update_score', {
+            roomId: rid,
+            isHost,
+            finalScore,
+            isDone: true
+         });
       }
       return;
     }
+
+    if (socketRef.current) {
+        socketRef.current.emit('update_score', {
+           roomId: rid,
+           isHost,
+           finalScore,
+           isDone: false
+        });
+    }
+
     setCurrentQ(nextQ);
     setTimeLeft(TIME_PER_Q);
     startTimer(rid, roomData, nextQ, finalScore);
   };
 
-  const leaveRoom = async () => {
+  const leaveRoom = () => {
     stopTimer();
-    if (roomId && isHost) {
-      try {
-        await remove(ref(rtdb, "battles/" + roomId));
-      } catch (e) {}
+    if (roomId && socketRef.current) {
+      socketRef.current.emit('leave_room', roomId);
     }
     setPhase("lobby");
     setRoomId("");
@@ -298,7 +282,7 @@ export default function Battle() {
 
   const myFinalScore = score;
   const theirFinalScore = enemyScore;
-  const iWon = room?.winner === user?.uid;
+  const iWon = room?.winner === user?.id;
   const isDraw = room?.winner === "draw";
 
   return (

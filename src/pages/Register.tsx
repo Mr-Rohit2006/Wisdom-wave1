@@ -1,8 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
-import { auth, db } from "../firebase";
+import { registerUser } from "../services/api";
 
 export default function Register() {
   const navigate = useNavigate();
@@ -29,36 +27,11 @@ export default function Register() {
     if (Object.keys(errs).length) { setErrors(errs); return; }
     setLoading(true);
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, form.email, form.password);
-      const user = userCredential.user;
-
-      await updateProfile(user, { displayName: form.username });
-
-      // Save user data to Firestore
-      await setDoc(doc(db, "users", user.uid), {
-        uid: user.uid,
-        username: form.username,
-        email: form.email,
-        xp: 100,
-        level: 1,
-        streak: 0,
-        battlesWon: 0,
-        puzzlesSolved: 0,
-        rank: 999,
-        createdAt: serverTimestamp(),
-        lastActive: serverTimestamp(),
-        activity: [],
-      });
-
-      navigate("/login");
+      const data = await registerUser({ username: form.username, email: form.email, password: form.password });
+      localStorage.setItem("token", data.token);
+      navigate("/dashboard");
     } catch (err: any) {
-      if (err.code === "auth/email-already-in-use") {
-        setErrors({ email: "Email already registered. Try logging in!" });
-      } else if (err.code === "auth/weak-password") {
-        setErrors({ password: "Password too weak. Use min 8 characters." });
-      } else {
-        setErrors({ email: "Something went wrong. Try again!" });
-      }
+      setErrors({ email: err.message || "Something went wrong. Try again!" });
     } finally {
       setLoading(false);
     }

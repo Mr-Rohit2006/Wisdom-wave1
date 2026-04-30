@@ -1,10 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { auth, db } from "../firebase";
-import {
-  doc,
-  getDoc,
-} from "firebase/firestore";
+import { fetchUserData } from "../services/userServices";
 import { LANGUAGES } from "../data/arcadeQuestions";
 import {
   JAVA_OUTPUT_TOPICS,
@@ -207,7 +203,6 @@ function getXPMultiplier(mode: GameMode): number {
 
 export default function Arcade() {
   const navigate = useNavigate();
-  const user = auth.currentUser;
 
   // ── STATE ──
   const [view, setView] = useState<View>("lang");
@@ -234,18 +229,24 @@ export default function Arcade() {
   const [lastQuizAlreadyDone, setLastQuizAlreadyDone] = useState(false);
 
   useEffect(() => {
-    if (!user) { navigate("/login"); return; }
-    getDoc(doc(db, "users", user.uid)).then((snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        setUserXP(data.xp ?? 0);
-        // Load persisted completed topics
-        const done: string[] = data.topicsDone ?? [];
-        setTopicsDone(done);
-        setSolvedTopics(new Set(done));
+    const initData = async () => {
+      const token = localStorage.getItem("token");
+      if (!token) { navigate("/login"); return; }
+      try {
+        const data = await fetchUserData("me");
+        if (data) {
+          setUserXP(data.xp ?? 0);
+          const done: string[] = data.topicsDone ?? [];
+          setTopicsDone(done);
+          setSolvedTopics(new Set(done));
+        }
+      } catch (err) {
+        console.error(err);
+        navigate("/login");
       }
-    });
-  }, []);
+    };
+    initData();
+  }, [navigate]);
 
   const handleTimeOut = useCallback(() => {
     if (confirmed) return;
@@ -309,7 +310,7 @@ export default function Arcade() {
   // reset old state first
   setLastQuizAlreadyDone(false);
 
-  if (!user || !selTopic) {
+  if (!selTopic) {
     setView("results");
     return;
   }
@@ -337,7 +338,7 @@ export default function Arcade() {
 
   try {
     const result = await saveTopicCompletion({
-      uid: user.uid,
+      uid: "me",
       langId: selLang?.id ?? "",
       topicId:  `${selMode}_${selTopic.id}`,
       xpEarned: earnedXP,
