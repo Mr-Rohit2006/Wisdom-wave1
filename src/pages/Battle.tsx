@@ -111,7 +111,8 @@ export default function Battle() {
     }
 
     // Connect socket
-    socketRef.current = io("http://localhost:5000");
+    const socketUrl = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace('/api', '') : 'http://localhost:5005';
+    socketRef.current = io(socketUrl);
 
     socketRef.current.on('room_created', (data) => {
       setRoomId(data.roomId);
