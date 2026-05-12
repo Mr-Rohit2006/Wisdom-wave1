@@ -27,13 +27,19 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 
 // Serve static files from the React app
-app.use(express.static(path.join(__dirname, '../dist')));
+app.use(express.static(path.resolve(__dirname, '..', 'dist')));
 
 // The "catchall" handler: for any request that doesn't
 // match one above, send back React's index.html file.
-app.get('*all', (req, res) => {
-  res.sendFile(path.join(__dirname, '../dist/index.html'));
+app.get('/*', (req, res) => {
+  res.sendFile(path.resolve(__dirname, '..', 'dist', 'index.html'), (err) => {
+    if (err) {
+      res.status(500).send("Index.html not found. Please check your build.");
+    }
+  });
 });
+
+
 
 
 
