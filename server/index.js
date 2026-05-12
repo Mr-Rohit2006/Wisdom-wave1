@@ -1,6 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
+const path = require('path');
+
 const mongoose = require('mongoose');
 const cors = require('cors');
 const { Server } = require('socket.io');
@@ -23,6 +25,18 @@ mongoose.connect(process.env.MONGO_URI)
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+
+// Serve static files from the React app
+app.use(express.static(path.join(__dirname, '../dist')));
+
+// The "catchall" handler: for any request that doesn't
+// match one above, send back React's index.html file.
+app.get('*all', (req, res) => {
+  res.sendFile(path.join(__dirname, '../dist/index.html'));
+});
+
+
+
 
 // Socket.io for Battle Mode
 const io = new Server(server, {
