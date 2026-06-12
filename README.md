@@ -14,7 +14,7 @@
 
 **Wisdom Wave** is a gamified multiplayer coding arena and learn-to-code platform. Experience coding through immersive single-player challenge pathways, algorithmic puzzles, and real-time PvP coding battles with users around the world. Designed with a sleek, futuristic dark-mode aesthetic featuring glowing ambient orbs and smooth custom micro-interactions.
 
-🚀 **Live App**: [wisdom-wave1.onrender.com](https://wisdom-wave1.onrender.com)
+🚀 **Live App**: [wisdom-wave1.vercel.app](wisdom-wave1.vercel.app)
 
 ---
 
